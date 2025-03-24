@@ -1,0 +1,59 @@
+1. Primary Key (PK) Constraints:
+Each table/entity has a unique primary key to uniquely identify records. On the ERD 
+PK's are bolded and underlined.
+
+
+2. Foreign Key (FK) Constraints:
+Foreign keys enforce referential integrity by establishing relationships between tables.
+
+  Streets
+DistrictID references Districts(DistrictID)
+
+  Addresses
+StreetID references Streets(StreetID)
+
+  Orders
+CustomerID references Customers(CustomerID)
+
+  OrderDetails
+OrderID references Orders(OrderID)
+MenuItemID references MenuItems(MenuItemID)
+
+  Deliveries
+OrderID references Orders(OrderID)
+CourierID references Couriers(CourierID)
+DeliveryStatusID references DeliveryStatuses(DeliveryStatusID)
+
+  OrderDeliveryAddress
+DeliveryID references Deliveries(DeliveryID)
+AddressID references Addresses(AddressID)
+
+  Payments
+OrderID references Orders(OrderID)
+PaymentMethodID references PaymentMethods(PaymentMethodID)
+
+  Ingredients
+SupplierID references Suppliers(SupplierID)
+
+  ItemIngredients
+MenuItemID references MenuItems(MenuItemID)
+IngredientID references Ingredients(IngredientID)
+
+3. Associative Entity Constraints:
+Associative entities enforce uniqueness and integrity of many-to-many relationships:
+
+OrderDetails ensures unique MenuItem per Order.
+OrderDeliveryAddress ensures each Delivery is associated with exactly one Address.
+ItemIngredients ensures unique Ingredient per MenuItem combination.
+
+4. Attribute Constraints
+Addresses: ApartmentNumber can be nullable, other attributes non-nullable.
+All other entities and attributes are implicitly non-nullable unless specified otherwise.
+
+5. Logical Constraints :
+Each Order must have at least one OrderDetail entry.
+Each Delivery corresponds to exactly one Order.
+Each Delivery is assigned exactly one Courier.
+Each Delivery has exactly one DeliveryStatus at a given time.
+Payments must correspond to an existing Order.
+Ingredients must have an associated Supplier.
