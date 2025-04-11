@@ -2,6 +2,7 @@
 
 -- Task 1	
 -- 1) All animation movies released between 2017 and 2019 with rate more than 1, alphabetical
+
 SELECT 
     f.title AS movie_title, 
     f.release_year, 
@@ -9,11 +10,11 @@ SELECT
 FROM film f 
 INNER JOIN film_category fc ON fc.film_id = f.film_id
 INNER JOIN category c ON fc.category_id = c.category_id
-WHERE c.name = 'Animation'
+WHERE LOWER(c.name) = 'animation'
   AND f.release_year BETWEEN 2017 AND 2019
-  AND f.rental_rate  > 1
-GROUP BY f.film_id, f.title, f.release_year, f.rental_rate
+  AND f.rental_rate > 1
 ORDER BY movie_title;
+
 
 -- By using this query I joined film with film_category, to link films to genres and
 -- film_category with category, to get the category 'Animation'. After it I simply
@@ -26,8 +27,9 @@ ORDER BY movie_title;
 
 SELECT 
     (a.address || 
-     CASE WHEN a.address2 IS NOT NULL AND a.address2 <> '' 
-          THEN ', ' || a.address2 ELSE '' END) AS full_address,
+     CASE 
+         WHEN a.address2 IS NOT NULL AND a.address2 <> '' 
+         THEN ', ' || a.address2  ELSE '' END) AS full_address,
     SUM(p.amount) AS revenue
 FROM store s
 INNER JOIN address a ON s.address_id = a.address_id
@@ -35,8 +37,14 @@ INNER JOIN inventory i ON s.store_id = i.store_id
 INNER JOIN rental r ON i.inventory_id = r.inventory_id
 INNER JOIN payment p ON r.rental_id = p.rental_id
 WHERE p.payment_date > '2017-03-31'
-GROUP BY s.store_id, full_address
+GROUP BY s.store_id, 
+         (a.address || 
+          CASE WHEN 
+          		a.address2 IS NOT NULL AND a.address2 <> '' 
+                THEN ', ' || a.address2 
+                ELSE ''  END)
 ORDER BY revenue DESC;
+
 
 -- In this query, I decided to write both addresses in one column by using pipe,
 -- but it showed me null values, so I decided to use case when to make sure address2 existed
@@ -75,15 +83,16 @@ LIMIT 5;
 
 SELECT 
     f.release_year,
-    COALESCE(SUM(CASE WHEN c.name = 'Drama' THEN 1 ELSE 0 END), 0) AS number_of_drama_movies,
-    COALESCE(SUM(CASE WHEN c.name = 'Travel' THEN 1 ELSE 0 END), 0) AS number_of_travel_movies,
-    COALESCE(SUM(CASE WHEN c.name = 'Documentary' THEN 1 ELSE 0 END), 0) AS number_of_documentary_movies
+    COALESCE(SUM(CASE WHEN LOWER(c.name) = 'drama' THEN 1 ELSE 0 END), 0) AS number_of_drama_movies,
+    COALESCE(SUM(CASE WHEN LOWER(c.name) = 'travel' THEN 1 ELSE 0 END), 0) AS number_of_travel_movies,
+    COALESCE(SUM(CASE WHEN LOWER(c.name) = 'documentary' THEN 1 ELSE 0 END), 0) AS number_of_documentary_movies
 FROM film f
 INNER JOIN film_category fc ON f.film_id = fc.film_id
 INNER JOIN category c ON fc.category_id = c.category_id
-WHERE c.name IN ('Drama', 'Travel', 'Documentary')
+WHERE LOWER(c.name) IN ('drama', 'travel', 'documentary')
 GROUP BY f.release_year
 ORDER BY f.release_year DESC;
+
 
 
 -- This query Uses CASE statements to count only the specific genres (Drama, Travel, Documentary). After this it
@@ -155,7 +164,7 @@ SELECT
 FROM film f
 INNER JOIN inventory i ON f.film_id = i.film_id
 INNER JOIN rental r ON i.inventory_id = r.inventory_id
-GROUP BY f.film_id, f.title, f.rating
+GROUP BY f.film_id
 ORDER BY rental_count DESC
 LIMIT 5;
 
@@ -173,16 +182,17 @@ LIMIT 5;
 
 SELECT
     a.actor_id,
-    a.first_name,
-    a.last_name,
+    MAX(a.first_name) AS first_name,
+    MAX(a.last_name) AS last_name,
     MAX(f.release_year) AS latest_movie_year,
     (EXTRACT(YEAR FROM CURRENT_DATE) - MAX(f.release_year)) AS gap_years
 FROM actor a
 INNER JOIN film_actor fa ON a.actor_id = fa.actor_id
 INNER JOIN film f ON fa.film_id = f.film_id
-GROUP BY a.actor_id, a.first_name, a.last_name
+GROUP BY a.actor_id
 ORDER BY gap_years DESC
 LIMIT 10;
+
 
 -- By this query I retrieved each actor’s latest film release year. 
 -- Calculated the gap between the latest release year and the current year and ordered 
@@ -192,39 +202,41 @@ LIMIT 10;
 
 -- v2: gaps between sequential films per each actor;
 
-WITH actor_films AS (
-    SELECT
+WITH actor_film_years AS (
+    SELECT DISTINCT
         a.actor_id,
         a.first_name,
         a.last_name,
-        f.release_year,
-        LAG(f.release_year) OVER (PARTITION BY a.actor_id ORDER BY f.release_year) AS previous_year
+        f.release_year
     FROM actor a
     INNER JOIN film_actor fa ON a.actor_id = fa.actor_id
     INNER JOIN film f ON fa.film_id = f.film_id
 ),
 
-actor_gaps AS (
+year_pairs AS (
     SELECT
-        actor_id,
-        first_name,
-        last_name,
-        release_year,
-        previous_year,
-        (release_year - previous_year) AS gap_years
-    FROM actor_films
-    WHERE previous_year IS NOT NULL
+        af1.actor_id,
+        af1.first_name,
+        af1.last_name,
+        af1.release_year AS current_year,
+        af2.release_year AS previous_year,
+        (af1.release_year - af2.release_year) AS gap_years
+    FROM actor_film_years af1
+    INNER JOIN actor_film_years af2 
+        ON af1.actor_id = af2.actor_id
+        AND af1.release_year > af2.release_year
 )
 
 SELECT
     actor_id,
-    first_name,
-    last_name,
+    MAX(first_name) AS first_name,
+    MAX(last_name) AS last_name,
     MAX(gap_years) AS longest_gap
-FROM actor_gaps
-GROUP BY actor_id, first_name, last_name
+FROM year_pairs
+GROUP BY actor_id
 ORDER BY longest_gap DESC
 LIMIT 10;
+
 
 -- actor_films CTE gets each actor with their film release years. film_pairs CTE Self-joins the film years 
 -- for each actor to calculate all possible year gaps where year2 > year1. actor_max_gaps CTE 
