@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION public.new_movie(
+SET search_path TO public;
+
+CREATE OR REPLACE FUNCTION new_movie(
     p_title TEXT,
     p_release_year INTEGER DEFAULT EXTRACT(YEAR FROM CURRENT_DATE),
     p_language TEXT DEFAULT 'Klingon')
@@ -10,7 +12,7 @@ BEGIN
     -- By this query I check that the language exists in the language table
     SELECT language_id INTO v_lang_id
     FROM language
-    WHERE name = p_language;
+    WHERE LOWER(name) = LOWER(p_language);
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Language % does not exist in language table.', p_language;

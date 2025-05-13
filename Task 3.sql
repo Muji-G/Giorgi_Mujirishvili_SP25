@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION public.most_popular_films_by_countries(countries TEXT[])
+SET search_path TO public;
+
+CREATE OR REPLACE FUNCTION most_popular_films_by_countries(countries TEXT[])
 RETURNS TABLE (
     country TEXT, film TEXT,
     rating TEXT, language TEXT,
@@ -17,11 +19,13 @@ BEGIN
     JOIN inventory i ON r.inventory_id = i.inventory_id
     JOIN film f ON i.film_id = f.film_id
     JOIN language l ON f.language_id = l.language_id
-    WHERE co.country = ANY(countries)
+    WHERE LOWER(co.country) = ANY (
+        SELECT LOWER(c) FROM unnest(countries) AS c
+    )
     GROUP BY co.country, f.title, f.rating, l.name, f.length, f.release_year
     ORDER BY co.country, COUNT(*) DESC;
 END;
 $$ LANGUAGE plpgsql;
 
 
-select * from public.most_popular_films_by_countries(array['Afghanistan', 'Brazil', 'United States']);
+select * from most_popular_films_by_countries(array['afghanistan', 'brazil', 'united States']);
