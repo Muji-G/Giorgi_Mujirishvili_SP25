@@ -1,3 +1,5 @@
+SET search_path TO public;
+
 -- at first I create a role for customer users
 CREATE ROLE customer_user NOINHERIT LOGIN PASSWORD 'securepassword';
 

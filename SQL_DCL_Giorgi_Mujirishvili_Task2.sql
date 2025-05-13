@@ -1,5 +1,6 @@
 -- 1) Create a new user with the username "rentaluser" and the password "rentalpassword".
 -- Give the user the ability to connect to the database but no other permissions.
+SET search_path TO public;
 
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'rentaluser') THEN
