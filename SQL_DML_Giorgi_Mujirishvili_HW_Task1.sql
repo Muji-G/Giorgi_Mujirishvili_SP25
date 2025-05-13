@@ -2,195 +2,173 @@
 
 -- Choose your top-3 favorite movies and add them to the 'film' table 
 -- Fill in rental rates with 4.99, 9.99 and 19.99 and rental durations with 1, 2 and 3 weeks respectively.
+SET search_path TO public;
 
 START TRANSACTION;
-
 INSERT INTO film (
-    title, 
-    description, 
-    release_year, 
-    language_id, 
-    rental_duration, 
-    rental_rate, 
-    length, 
-    replacement_cost, 
-    rating, 
-    special_features
-) VALUES (
-    'Eyes Wide Shut', 
-    'A Manhattan doctor embarks on a bizarre, night-long odyssey', 
-    1999, 
-    1, 
-    1, 
-    4.99, 
-    159, 
-    21.99, 
-    'R', 
-    '{Trailers}'
-);
+    title, description, release_year, language_id, rental_duration, rental_rate, length,
+    replacement_cost, rating, special_features, last_update
+)
+SELECT 
+    v.title, v.description, v.release_year, l.language_id, v.rental_duration, v.rental_rate,
+    v.length, v.replacement_cost, v.rating::mpaa_rating, v.special_features, current_date
+FROM (
+    VALUES
+        ('Eyes Wide Shut', 'A Manhattan doctor embarks on a bizarre, night-long odyssey', 1999, 7, 4.99, 159, 21.99, 'R', ARRAY['Trailers']),
+        ('The Art of Self Defense', 'After being attacked on the street, a young man enlists at a local dojo', 2019, 14, 9.99, 104, 14.99, 'R', ARRAY['Trailers']),
+        ('Manchester by the Sea', 'An uncle is forced to take care of his teenage nephew', 2016, 21, 19.99, 137, 29.99, 'R', ARRAY['Trailers'])
+) AS v(title, description, release_year, rental_duration, rental_rate, length, replacement_cost, rating, special_features)
+JOIN language l ON l.name = 'English'
+WHERE NOT EXISTS (
+    SELECT 1 FROM film f WHERE f.title = v.title
+)
+RETURNING film_id;
 
-INSERT INTO film (
-    title, 
-    description, 
-    release_year, 
-    language_id, 
-    rental_duration, 
-    rental_rate, 
-    length, 
-    replacement_cost, 
-    rating, 
-    special_features
-) VALUES (
-    'The Art of Self Defense', 
-    'After being attacked on the street, a young man enlists at a local dojo', 
-    2019, 
-    1, 
-    2, 
-    9.99, 
-    104, 
-    14.99, 
-    'R', 
-    '{Trailers}'
-);
+--Add the actors who play leading roles in your favorite movies to the 'actor' and 'film_actor' tables
 
-INSERT INTO film (
-    title, 
-    description, 
-    release_year, 
-    language_id, 
-    rental_duration, 
-    rental_rate, 
-    length, 
-    replacement_cost, 
-    rating, 
-    special_features
-) VALUES (
-    'Manchester by the Sea', 
-    'An uncle is forced to take care of his teenage nephew', 
-    2016, 
-    1, 
-    3, 
-    19.99, 
-    137, 
-    29.99, 
-    'R', 
-    '{Trailers}'
-);
+INSERT INTO actor (first_name, last_name, last_update)
+SELECT v.first_name, v.last_name, current_date
+FROM (
+    VALUES
+        ('Tom', 'Cruise'),
+        ('Nicole', 'Kidman'),
+        ('Sydney', 'Pollack'),
+        ('Jesse', 'Eisenberg'),
+        ('Alessandro', 'Nivola'),
+        ('Casey', 'Affleck'),
+        ('Michelle', 'Williams'),
+        ('Lucas', 'Hedges')
+) AS v(first_name, last_name)
+WHERE NOT EXISTS (
+    SELECT 1 FROM actor a WHERE a.first_name = v.first_name AND a.last_name = v.last_name
+)
+RETURNING actor_id;
 
-COMMIT;
-
--- I added those three movies and I skipped columns film_id, because it is auto increment and there was no need to 
--- add identificator manually, original_language_id, because it was NULL in most cases, last_update, since the 
--- default value of that column is NOW and Fulltext, since it writes values by itself. I typed trailers in {} braces
--- because the data type forced me to.
-
--- Add the actors who play leading roles in your favorite movies to the 'actor' and 'film_actor' tables (6 or more actors in total).  
-select * from actor a 
-
-START TRANSACTION;
-
--- 1. Insert actors 
--- Since I know that there are no real named actors in db I use simple query
-START TRANSACTION;
-
--- Insert 8 known actors (assuming none exist in the actor table)
-INSERT INTO actor (first_name, last_name)
-VALUES 
-    ('Tom', 'Cruise'),
-    ('Nicole', 'Kidman'),
-    ('Jesse', 'Eisenberg'),
-    ('Casey', 'Affleck'),
-    ('Michelle', 'Williams'),
-    ('Sydney', 'Pollack'),
-    ('Alessandro', 'Nivola'),
-    ('Lucas', 'Hedges');
-
-COMMIT;
-
--- If I wanted to make sure that there are no duplicates I would write additonally where not exists, for example
--- WHERE NOT EXISTS (
---    SELECT 1 FROM actor WHERE first_name = 'Michelle' AND last_name = 'Williams')
-
-			
--- 2. Link actors to films in film_actor table
-
-START TRANSACTION;
 
 -- Eyes Wide Shut
-INSERT INTO film_actor (film_id, actor_id)
-SELECT f.film_id, a.actor_id
-FROM film f, actor a
-WHERE f.title = 'Eyes Wide Shut'
-  AND (a.first_name, a.last_name) IN (
-      ('Tom', 'Cruise'),
-      ('Nicole', 'Kidman'),
-      ('Sydney', 'Pollack')
-  );
+INSERT INTO film_actor (actor_id, film_id, last_update)
+SELECT a.actor_id, f.film_id, current_date
+FROM actor a
+JOIN film f ON f.title = 'Eyes Wide Shut'
+WHERE (a.first_name, a.last_name) IN (('Tom', 'Cruise'), ('Nicole', 'Kidman'), ('Sydney', 'Pollack'))
+  AND NOT EXISTS (
+      SELECT 1 FROM film_actor fa WHERE fa.actor_id = a.actor_id AND fa.film_id = f.film_id
+)
+RETURNING actor_id, film_id;
 
 -- The Art of Self Defense
-INSERT INTO film_actor (film_id, actor_id)
-SELECT f.film_id, a.actor_id
-FROM film f, actor a
-WHERE f.title = 'The Art of Self Defense'
-  AND (a.first_name, a.last_name) IN (
-      ('Jesse', 'Eisenberg'),
-      ('Alessandro', 'Nivola')
-  );
+INSERT INTO film_actor (actor_id, film_id, last_update)
+SELECT a.actor_id, f.film_id, current_date
+FROM actor a
+JOIN film f ON f.title = 'The Art of Self Defense'
+WHERE (a.first_name, a.last_name) IN (('Jesse', 'Eisenberg'), ('Alessandro', 'Nivola'))
+  AND NOT EXISTS (
+      SELECT 1 FROM film_actor fa WHERE fa.actor_id = a.actor_id AND fa.film_id = f.film_id
+)
+RETURNING actor_id, film_id;
 
 -- Manchester by the Sea
-INSERT INTO film_actor (film_id, actor_id)
-SELECT f.film_id, a.actor_id
-FROM film f, actor a
-WHERE f.title = 'Manchester by the Sea'
-  AND (a.first_name, a.last_name) IN (
-      ('Casey', 'Affleck'),
-      ('Michelle', 'Williams'),
-      ('Lucas', 'Hedges')
-  );
+INSERT INTO film_actor (actor_id, film_id, last_update)
+SELECT a.actor_id, f.film_id, current_date
+FROM actor a
+JOIN film f ON f.title = 'Manchester by the Sea'
+WHERE (a.first_name, a.last_name) IN (('Casey', 'Affleck'), ('Michelle', 'Williams'), ('Lucas', 'Hedges'))
+  AND NOT EXISTS (
+      SELECT 1 FROM film_actor fa WHERE fa.actor_id = a.actor_id AND fa.film_id = f.film_id
+)
+RETURNING actor_id, film_id;
 
-COMMIT;
-
-
--- Same thing applies here too, I knew there were no duplicates so I simplified the query.
-
--- Add your favorite movies to any store's inventory.
-
-START TRANSACTION;
-
--- Eyes Wide Shut
-INSERT INTO inventory (film_id, store_id)
-SELECT f.film_id, 1
+-- now I add those movies to store, where stre id is 1
+INSERT INTO inventory (film_id, store_id, last_update)
+SELECT f.film_id, 1, current_date
 FROM film f
-WHERE f.title = 'Eyes Wide Shut';
-
--- The Art of Self Defense
-INSERT INTO inventory (film_id, store_id)
-SELECT f.film_id, 1
-FROM film f
-WHERE f.title = 'The Art of Self Defense';
-
--- Manchester by the Sea
-INSERT INTO inventory (film_id, store_id)
-SELECT f.film_id, 1
-FROM film f
-WHERE f.title = 'Manchester by the Sea';
-
-COMMIT;
-
-
+WHERE f.title IN ('Eyes Wide Shut', 'The Art of Self Defense', 'Manchester by the Sea')
+  AND NOT EXISTS (
+      SELECT 1 FROM inventory i WHERE i.film_id = f.film_id AND i.store_id = 1
+)
+RETURNING inventory_id, film_id;
 
 -- Alter any existing customer in the database with at least 43 rental and 43 payment records.
 -- Change their personal data to yours (first name, last name, address, etc.)
 
--- At first, lets find the customer who has at least 43 rental and 43 payment records
+-- at first, lets find the customer who has at least 43 rental and 43 payment records
 
-SELECT c.customer_id
-FROM customer c
-JOIN rental r ON c.customer_id = r.customer_id
-JOIN payment p ON c.customer_id = p.customer_id
-GROUP BY c.customer_id
-HAVING COUNT(DISTINCT r.rental_id) >= 43 AND COUNT(DISTINCT p.payment_id) >= 43
-LIMIT 1;
+WITH qualified_customer AS (
+    SELECT c.customer_id
+    FROM customer c
+    JOIN rental r ON c.customer_id = r.customer_id
+    JOIN payment p ON c.customer_id = p.customer_id
+    GROUP BY c.customer_id
+    HAVING COUNT(DISTINCT r.rental_id) >= 43 AND COUNT(DISTINCT p.payment_id) >= 43
+    LIMIT 1
+),
 
--- The outcome of this quey was customer_id = 1, which means that I will change his data to mine
--- Now let's take the adress, which adress_id 1 and use it in my task
+-- now I clean up customer's history
+
+deleted_payments AS (
+    DELETE FROM payment
+    WHERE customer_id = (SELECT customer_id FROM qualified_customer)
+    RETURNING payment_id
+),
+deleted_rentals AS (
+    DELETE FROM rental
+    WHERE customer_id = (SELECT customer_id FROM qualified_customer)
+    RETURNING rental_id
+),
+
+--  updating customer info
+
+updated_customer AS (
+    UPDATE customer
+    SET first_name = 'Giorgi',
+        last_name = 'Mujirishvili',
+        email = 'mujirishvili.giorgi@gmail.com',
+        address_id = 1,
+        last_update = current_date
+    WHERE customer_id = (SELECT customer_id FROM qualified_customer)
+    RETURNING customer_id
+),
+
+-- for renting the movies I found a way to simulate different dates using film_id % 10
+
+new_rentals AS (
+    INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id, return_date, last_update)
+    SELECT 
+        DATE '2017-01-01' + (f.film_id % 10),
+        i.inventory_id,
+        qc.customer_id,
+        1,
+        DATE '2017-01-03' + (f.film_id % 10),
+        current_date
+    FROM inventory i
+    JOIN film f ON f.film_id = i.film_id
+    JOIN qualified_customer qc ON TRUE
+    WHERE f.title IN ('Eyes Wide Shut', 'The Art of Self Defense', 'Manchester by the Sea')
+      AND NOT EXISTS (
+          SELECT 1 FROM rental r 
+          WHERE r.inventory_id = i.inventory_id AND r.customer_id = qc.customer_id
+    )
+    RETURNING rental_id, inventory_id, customer_id
+)
+
+-- since payment didn't have last_updated column I used a temporary column to not alter the schema permanently
+
+INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date)
+SELECT 
+    nr.customer_id,
+    1,
+    nr.rental_id,
+    CASE f.title
+        WHEN 'Eyes Wide Shut' THEN 4.99
+        WHEN 'The Art of Self Defense' THEN 9.99
+        WHEN 'Manchester by the Sea' THEN 19.99
+    END,
+    DATE '2017-01-03' + (f.film_id % 10)
+FROM new_rentals nr
+JOIN inventory i ON nr.inventory_id = i.inventory_id
+JOIN film f ON i.film_id = f.film_id
+WHERE f.title IN ('Eyes Wide Shut', 'The Art of Self Defense', 'Manchester by the Sea')
+RETURNING payment_id, amount;
+
+COMMIT;
+
