@@ -11,34 +11,28 @@ SET search_path TO sh;
 --Display the result for each channel in descending order of sales
 
 
-WITH  
-	cst AS
-		(SELECT 
-			cust_id,
-			channel_id,
-			SUM(amount_sold) AS amount_sold,
-			RANK() OVER (PARTITION BY channel_id ORDER BY SUM(amount_sold) DESC) AS sales_rank
-		FROM sales
-		GROUP BY cust_id,channel_id
-		ORDER BY channel_id, SUM(amount_sold) DESC),
-	ch AS
-		(SELECT 
-			channel_id,
-			SUM(amount_sold) AS channel_sales
-		FROM sales
-		GROUP BY channel_id)
+WITH cst AS (
+    SELECT 
+        cust_id,
+        channel_id,
+        SUM(amount_sold) AS amount_sold,
+        RANK() OVER (PARTITION BY channel_id ORDER BY SUM(amount_sold) DESC) AS sales_rank,
+        SUM(SUM(amount_sold)) OVER (PARTITION BY channel_id) AS channel_sales
+    FROM sales
+    GROUP BY cust_id, channel_id
+)
 SELECT 
-	cha.channel_desc,
-	cus.cust_last_name,
-	cus.cust_first_name,
-	cst.amount_sold::DECIMAL(10,2),
-	to_char(amount_sold * 100/ channel_sales,'FM999.0000%') as sales_percentage
+    cha.channel_desc,
+    cus.cust_last_name,
+    cus.cust_first_name,
+    cst.amount_sold::DECIMAL(10,2),
+    TO_CHAR(cst.amount_sold * 100.0 / cst.channel_sales, 'FM999.0000%') AS sales_percentage
 FROM cst
-INNER JOIN ch ON ch.channel_id = cst.channel_id
 INNER JOIN customers cus ON cus.cust_id = cst.cust_id 
-INNER JOIN channels cha ON cha.channel_id = ch.channel_id
+INNER JOIN channels cha ON cha.channel_id = cst.channel_id
 WHERE sales_rank <= 5
-ORDER BY cha.channel_desc, to_char(amount_sold * 100/ channel_sales,'FM999.00000%') DESC;
+ORDER BY cha.channel_desc, sales_percentage DESC;
+
 
 -- I used CTE because of complexity of the query. also, I needed to filter window function column (rank) with WHERE clause.
 
@@ -53,22 +47,34 @@ ORDER BY cha.channel_desc, to_char(amount_sold * 100/ channel_sales,'FM999.00000
 --Additional details and guidance can be found at this link
 
 
-SELECT 
-	p.prod_desc,
-	ROUND(SUM(CASE WHEN EXTRACT(quarter FROM s.time_id) = 1 THEN s.amount_sold ELSE 0 END),2) AS q1,
-	ROUND(SUM(CASE WHEN EXTRACT(quarter FROM s.time_id) = 2 THEN s.amount_sold ELSE 0 END),2) AS q2,
-	ROUND(SUM(CASE WHEN EXTRACT(quarter FROM s.time_id) = 3 THEN s.amount_sold ELSE 0 END),2) AS q3,
-	ROUND(SUM(CASE WHEN EXTRACT(quarter FROM s.time_id) = 4 THEN s.amount_sold ELSE 0 END),2) AS q4,
-	ROUND(SUM(s.amount_sold),2) AS year_sum
-FROM sales s
-INNER JOIN customers c ON s.cust_id = c.cust_id
-INNER JOIN countries co ON co.country_id = c.country_id
-INNER JOIN products p ON p.prod_id = s.prod_id
-WHERE UPPER(p.prod_category) = 'PHOTO'
-AND UPPER(co.country_region) = 'ASIA'
-AND s.time_id BETWEEN '2000-01-01' AND '2000-12-31'
-GROUP BY p.prod_id,p.prod_desc;
+CREATE EXTENSION IF NOT EXISTS tablefunc;
 
+SELECT 
+    ct.prod_desc,
+    ROUND(COALESCE(ct.q1, 0), 2) AS q1,
+    ROUND(COALESCE(ct.q2, 0), 2) AS q2,
+    ROUND(COALESCE(ct.q3, 0), 2) AS q3,
+    ROUND(COALESCE(ct.q4, 0), 2) AS q4,
+    ROUND(COALESCE(ct.q1, 0) + COALESCE(ct.q2, 0) + COALESCE(ct.q3, 0) + COALESCE(ct.q4, 0), 2) AS year_sum
+FROM crosstab(
+    $$
+    SELECT 
+        p.prod_desc,
+        EXTRACT(quarter FROM s.time_id)::INT AS quarter,
+        SUM(s.amount_sold) AS quarterly_sales
+    FROM sales s
+    INNER JOIN customers c ON s.cust_id = c.cust_id
+    INNER JOIN countries co ON co.country_id = c.country_id
+    INNER JOIN products p ON p.prod_id = s.prod_id
+    WHERE UPPER(p.prod_category) = 'PHOTO'
+      AND UPPER(co.country_region) = 'ASIA'
+      AND s.time_id BETWEEN '2000-01-01' AND '2000-12-31'
+    GROUP BY p.prod_desc, quarter
+    ORDER BY p.prod_desc, quarter
+    $$,
+    $$ SELECT generate_series(1,4) $$
+) AS ct(prod_desc TEXT, q1 NUMERIC, q2 NUMERIC, q3 NUMERIC, q4 NUMERIC)
+ORDER BY ct.prod_desc;
 
 --Task 3
 --Create a query to generate a sales report for customers ranked in the top 300 based 
