@@ -35,18 +35,21 @@ def task_1():
 
 
 def task_2(top_k: int):
-    with open(PATH_TO_TEXT, encoding="utf-8") as f:
-        text = f.read()
+    counter = {}
 
-    with open(PATH_TO_STOP_WORDS, encoding="utf-8") as f:
-        stop_words = set(word.strip().lower() for word in f if word.strip())
+    with PATH_TO_STOP_WORDS.open(encoding='utf-8') as stop_word_txt, PATH_TO_TEXT.open(encoding='utf-8') as txt_file:
+        stop_words = set(stop_word_txt.read().splitlines())
+        word_regex = re.compile(r'\w+')
+        words = word_regex.findall(txt_file.read().lower())
 
-    words = simple_preprocess(text)
+        for word in words:
+            if word in stop_words:
+                continue
 
-    filtered_words = [word for word in words if word not in stop_words]
+            counter[word] = counter.get(word, 0) + 1
 
-    counter = Counter(filtered_words)
-    return counter.most_common(top_k)
+    results = sorted(counter.items(), key=lambda x: x[1], reverse=True)[:top_k]
+    return results
 
 
 def task_3(url: str):
@@ -60,11 +63,12 @@ def task_3(url: str):
 
 def task_4(data: List[Union[int, str, float]]):
     total = 0
-    for value in data:
+    for item in data:
         try:
-            total += float(value)
-        except (ValueError, TypeError):
-            continue
+            total += item
+        except (TypeError, ValueError):
+            total += float(item)
+
     return total
 
 
