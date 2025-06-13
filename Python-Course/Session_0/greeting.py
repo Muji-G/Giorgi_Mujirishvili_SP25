@@ -1,5 +1,4 @@
 def greeting():
-    print("Hello, World!")
-
+    print("Giorgi Mujirishvili")
 
 greeting()
