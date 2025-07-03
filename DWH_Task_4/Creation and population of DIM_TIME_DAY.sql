@@ -1,36 +1,39 @@
---Creating the DIM_DATES table
-CREATE TABLE IF NOT EXISTS DIM_DATES (
-    DATE_KEY         INTEGER PRIMARY KEY,               -- surrogate key (YYYYMMDD)
+CREATE DATABASE supermarket_dw;
+
+--Creatinh schema for dimensional model
+CREATE SCHEMA IF NOT EXISTS BL_DM;
+
+--Creating DIM_TIME_DAY table
+CREATE TABLE IF NOT EXISTS BL_DM.DIM_TIME_DAY (
+    DATE_ID          INTEGER PRIMARY KEY,               -- surrogate key (YYYYMMDD)
     DATE_ACT         DATE NOT NULL,                     -- actual calendar date
-    YEAR_NO          INTEGER NOT NULL CHECK (YEAR_NO BETWEEN 1900 AND 2100), -- calendar year
-    MONTH_NO         INTEGER NOT NULL CHECK (MONTH_NO BETWEEN 1 AND 12), -- month number
-    DAY_NO           INTEGER NOT NULL CHECK (DAY_NO BETWEEN 1 AND 31), -- day of the month
-    WEEK_NO          INTEGER NOT NULL CHECK (WEEK_NO BETWEEN 1 AND 53),	-- week number
-    WEEKDAY_NO       INTEGER NOT NULL CHECK (WEEKDAY_NO BETWEEN 0 AND 6), -- weekday number
+    YEAR_NO          INTEGER NOT NULL CHECK (YEAR_NO BETWEEN 1900 AND 2100),
+    MONTH_NO         INTEGER NOT NULL CHECK (MONTH_NO BETWEEN 1 AND 12),
+    DAY_NO           INTEGER NOT NULL CHECK (DAY_NO BETWEEN 1 AND 31),
+    WEEK_NO          INTEGER NOT NULL CHECK (WEEK_NO BETWEEN 1 AND 53),
+    WEEKDAY_NO       INTEGER NOT NULL CHECK (WEEKDAY_NO BETWEEN 0 AND 6),
     WEEKDAY_NAME     VARCHAR(10) NOT NULL CHECK (
         WEEKDAY_NAME IN (
             'Sunday', 'Monday', 'Tuesday', 'Wednesday',
             'Thursday', 'Friday', 'Saturday'
         )
     ),
-
     MONTH_NAME       VARCHAR(10) NOT NULL CHECK (
         MONTH_NAME IN (
             'January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'
         )
     ),
-
     QUARTER_NO       INTEGER NOT NULL CHECK (QUARTER_NO BETWEEN 1 AND 4),
-
-    INSERT_DT        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UPDATE_DT        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    TA_INSERT_DT     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    TA_UPDATE_DT     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+--Insert data with
+START TRANSACTION;
 
--- Populating DIM_DATES with a range from 2000-01-01 to 2050-12-31
-INSERT INTO DIM_DATES (
-    DATE_KEY,
+INSERT INTO BL_DM.DIM_TIME_DAY (
+    DATE_ID,
     DATE_ACT,
     YEAR_NO,
     MONTH_NO,
@@ -42,7 +45,7 @@ INSERT INTO DIM_DATES (
     QUARTER_NO
 )
 SELECT
-    TO_CHAR(d, 'YYYYMMDD')::INTEGER          AS DATE_KEY,
+    TO_CHAR(d, 'YYYYMMDD')::INTEGER          AS DATE_ID,
     d                                        AS DATE_ACT,
     EXTRACT(YEAR FROM d)::INTEGER            AS YEAR_NO,
     EXTRACT(MONTH FROM d)::INTEGER           AS MONTH_NO,
@@ -56,6 +59,7 @@ FROM generate_series(
     DATE '2000-01-01',
     DATE '2050-12-31',
     INTERVAL '1 day'
-) AS d;
+) AS d
+ON CONFLICT DO NOTHING;
 
-ON CONFLICT (DATE_KEY) DO NOTHING;
+COMMIT;
