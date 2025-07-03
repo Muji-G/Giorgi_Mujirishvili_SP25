@@ -1,13 +1,15 @@
 """
 Module for preparing inverted indexes based on uploaded documents
 """
-
+import json
+import re
 import sys
 from argparse import ArgumentParser, ArgumentTypeError, FileType
 from io import TextIOWrapper
 from typing import Dict, List
 
 DEFAULT_PATH_TO_STORE_INVERTED_INDEX = "inverted.index"
+DEFAULT_PATH_TO_STOP_WORDS = 'stop_words_en.txt'
 
 
 class EncodedFileType(FileType):
@@ -44,28 +46,50 @@ class InvertedIndex:
     """
 
     def __init__(self, words_ids: Dict[str, List[int]]):
-        pass
+        self.data_dict = words_ids
 
     def query(self, words: List[str]) -> List[int]:
         """Return the list of relevant documents for the given query"""
-        pass
+        found_docs = list()
 
-    def dump(self, filepath: str) -> None:
+        for word in words:
+            if word in self.data_dict.keys():
+                found_docs.append(self.data_dict.get(word))
+        return found_docs
+
+    def reformat_dict_for_json(self, data):
+        """
+        Data was saved line by line so decided to do some reformatting
+        to make it more readable. Now every word is on separate line and
+        list of doc_ids goes horizontally not veritcally.
+        """
+        if isinstance(data, dict):
+            return {k: self.reformat_dict_for_json(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return json.dumps(data, separators=(', ', ': '), ensure_ascii=False)
+        return data
+
+
+    def dump(self, filepath: str = DEFAULT_PATH_TO_STORE_INVERTED_INDEX) -> None:
         """
         Allow us to write inverted indexes documents to temporary directory or local storage
         :param filepath: path to file with documents
         :return: None
         """
-        pass
+        with open(filepath, 'w') as dump_json:
+            reformatted_data = self.reformat_dict_for_json(self.data_dict)
+            json.dump(reformatted_data, dump_json, ensure_ascii=False,
+                      indent=2, separators=(', ', ': '))
 
     @classmethod
-    def load(cls, filepath: str):
+    def load(cls, filepath: str = DEFAULT_PATH_TO_STORE_INVERTED_INDEX):
         """
         Allow us to upload inverted indexes from either temporary directory or local storage
         :param filepath: path to file with documents
         :return: InvertedIndex
         """
-        pass
+        with open(filepath, 'r') as f:
+            return InvertedIndex(json.load(f))
 
 
 def load_documents(filepath: str) -> Dict[int, str]:
@@ -74,7 +98,16 @@ def load_documents(filepath: str) -> Dict[int, str]:
     :param filepath: path to file with documents
     :return: Dict[int, str]
     """
-    pass
+    indexed_dct = dict()
+    with open(filepath, 'r') as docs_data:
+        for line in docs_data.readlines():
+            doc_id, content = line.lower().split('\t', 1)
+            doc_id = int(doc_id)
+
+            if not indexed_dct.get(doc_id):
+                indexed_dct[doc_id] = content
+
+    return indexed_dct
 
 
 def build_inverted_index(documents: Dict[int, str]) -> InvertedIndex:
@@ -83,7 +116,23 @@ def build_inverted_index(documents: Dict[int, str]) -> InvertedIndex:
     :param documents: dict with documents
     :return: InvertedIndex class
     """
-    pass
+    res_dct = dict()
+
+    with open(DEFAULT_PATH_TO_STOP_WORDS, 'r') as stop_words:
+        stop_words_lst = stop_words.read().split('\n')
+
+        for doc in documents.items():
+            # Set to remove duplicates which helps in build_inverted_index
+            words = set(re.split(r'\W+', doc[1]))
+            words = filter(lambda w: w not in stop_words_lst, words)
+            # print(words)
+            for word in words:
+                if not res_dct.get(word):
+                    res_dct[word] = [doc[0]]
+                    continue
+                res_dct[word].append(doc[0])
+
+    return InvertedIndex(res_dct)
 
 
 def callback_build(arguments) -> None:
