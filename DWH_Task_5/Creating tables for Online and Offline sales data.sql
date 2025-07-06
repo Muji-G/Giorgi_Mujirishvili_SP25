@@ -1,14 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS sa_online;
 CREATE SCHEMA IF NOT EXISTS sa_offline;
 
-CREATE EXTENSION IF NOT EXISTS file_fdw;
-CREATE SERVER IF NOT EXISTS file_server
-FOREIGN DATA WRAPPER file_fdw;
-
--- Create schemas for each source system
-CREATE SCHEMA IF NOT EXISTS sa_online;
-CREATE SCHEMA IF NOT EXISTS sa_offline;
-
 -- Create file_fdw extension and server
 CREATE EXTENSION IF NOT EXISTS file_fdw;
 CREATE SERVER IF NOT EXISTS file_server
@@ -109,9 +101,66 @@ CREATE TABLE IF NOT EXISTS sa_offline.src_offline_orders (
     transaction_id         VARCHAR(50)
 );
 
--- Insert from EXT to SRC (offline)
-INSERT INTO sa_offline.src_offline_orders
-SELECT * FROM sa_offline.ext_offline_orders;
+-- inserting from EXT to SRC for offline orders
+BEGIN;
+
+INSERT INTO sa_offline.src_offline_orders (
+    date_text,
+    time_text,
+    item_code,
+    quantity_sold,
+    unit_selling_price,
+    sale_or_return,
+    discount,
+    category_code,
+    wholesale_price,
+    loss_rate,
+    total_sales,
+    cost,
+    gross_income,
+    year,
+    month,
+    day,
+    employee_id,
+    branch,
+    city,
+    source_system,
+    customer_id,
+    transaction_id
+)
+SELECT
+    date_text,
+    time_text,
+    item_code,
+    quantity_sold,
+    unit_selling_price,
+    sale_or_return,
+    discount,
+    category_code,
+    wholesale_price,
+    loss_rate,
+    total_sales,
+    cost,
+    gross_income,
+    year,
+    month,
+    day,
+    employee_id,
+    branch,
+    city,
+    source_system,
+    customer_id,
+    transaction_id
+FROM (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY transaction_id
+               ORDER BY transaction_id
+           ) AS rn
+    FROM sa_offline.ext_offline_orders
+) AS dedup
+WHERE rn = 1;
+
 COMMIT;
 
 -- Create target SRC tables (online)
@@ -145,9 +194,88 @@ CREATE TABLE IF NOT EXISTS sa_online.src_online_orders (
     transaction_id_2      VARCHAR(50)
 );
 
--- Insert from EXT to SRC (online)
-INSERT INTO sa_online.src_online_orders
-SELECT * FROM sa_online.ext_online_orders;
+-- checking for differences in transaction_id and customer_id fields
+SELECT COUNT(*) AS total_records FROM sa_online.ext_online_orders;
+
+SELECT COUNT(*) AS differing_transaction_ids
+FROM sa_online.ext_online_orders
+WHERE transaction_id_1 IS DISTINCT FROM transaction_id_2;
+
+SELECT COUNT(*) AS differing_customer_ids
+FROM sa_online.ext_online_orders
+WHERE customer_id_1 IS DISTINCT FROM customer_id_2;
+
+--inserting only deduplicated rows into SRC table, assuming transaction_id_1 is primary
+
+BEGIN;
+
+INSERT INTO sa_online.src_online_orders (
+    raw_date,
+    sale_time,
+    item_code,
+    quantity_sold,
+    unit_selling_price,
+    sale_or_return,
+    discount,
+    item_name,
+    category_code,
+    category_name,
+    wholesale_price,
+    loss_rate,
+    total_sales,
+    cost,
+    gross_income,
+    raw_datetime,
+    year,
+    month,
+    day,
+    employee_id,
+    branch,
+    city,
+    source_system,
+    transaction_id_1,
+    customer_id_1,
+    customer_id_2,
+    transaction_id_2
+)
+SELECT
+    raw_date,
+    sale_time,
+    item_code,
+    quantity_sold,
+    unit_selling_price,
+    sale_or_return,
+    discount,
+    item_name,
+    category_code,
+    category_name,
+    wholesale_price,
+    loss_rate,
+    total_sales,
+    cost,
+    gross_income,
+    raw_datetime,
+    year,
+    month,
+    day,
+    employee_id,
+    branch,
+    city,
+    source_system,
+    transaction_id_1,
+    customer_id_1,
+    customer_id_2,
+    transaction_id_2
+FROM (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY transaction_id_1
+               ORDER BY transaction_id_1
+           ) AS rn
+    FROM sa_online.ext_online_orders
+) AS dedup
+WHERE rn = 1;
+
 COMMIT;
 
 
