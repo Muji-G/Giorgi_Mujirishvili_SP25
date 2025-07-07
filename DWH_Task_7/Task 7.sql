@@ -124,8 +124,9 @@ CREATE TABLE IF NOT EXISTS BL_DM.dim_product_prices_scd (
 );
 COMMIT
 
-BEGIN
+
 -- fct_sales
+BEGIN;
 CREATE TABLE IF NOT EXISTS BL_DM.fct_sales (
     date_id             BIGINT NOT NULL,
     customer_id         BIGINT NOT NULL,
@@ -185,4 +186,71 @@ INSERT INTO BL_DM.dim_product_prices_scd
 SELECT -1, 'Unknown', 0.0, 0.0, '1990-01-01', '9999-12-31', 'N', CURRENT_DATE, CURRENT_DATE, 'DEFAULT', 'DEFAULT'
 WHERE NOT EXISTS (SELECT 1 FROM BL_DM.dim_product_prices_scd WHERE price_id = -1);
 
+COMMIT;
+
+
+-- altering the tables based on comments
+BEGIN;
+-- setting default sequence for dim_employees
+ALTER TABLE BL_DM.dim_employees
+ALTER COLUMN employee_id SET DEFAULT nextval('BL_DM.seq_dim_employees');
+
+-- setting default sequence for dim_customers
+ALTER TABLE BL_DM.dim_customers
+ALTER COLUMN customer_id SET DEFAULT nextval('BL_DM.seq_dim_customers');
+
+-- setting default sequence for dim_branches
+ALTER TABLE BL_DM.dim_branches
+ALTER COLUMN branch_id SET DEFAULT nextval('BL_DM.seq_dim_branches');
+
+-- setting default sequence for dim_channels
+ALTER TABLE BL_DM.dim_channels
+ALTER COLUMN channel_id SET DEFAULT nextval('BL_DM.seq_dim_channels');
+
+-- setting default sequence for dim_products
+ALTER TABLE BL_DM.dim_products
+ALTER COLUMN product_id SET DEFAULT nextval('BL_DM.seq_dim_products');
+
+-- setting default sequence for dim_product_prices_scd
+ALTER TABLE BL_DM.dim_product_prices_scd
+ALTER COLUMN price_id SET DEFAULT nextval('BL_DM.seq_dim_product_prices_scd');
+COMMIT;
+
+
+BEGIN;
+-- adding foreign key for date_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_date
+FOREIGN KEY (date_id)
+REFERENCES BL_DM.dim_dates(date_id);
+
+-- adding foreign key for customer_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_customer
+FOREIGN KEY (customer_id)
+REFERENCES BL_DM.dim_customers(customer_id);
+
+-- adding foreign key for employee_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_employee
+FOREIGN KEY (employee_id)
+REFERENCES BL_DM.dim_employees(employee_id);
+
+-- adding foreign key for product_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_product
+FOREIGN KEY (product_id)
+REFERENCES BL_DM.dim_products(product_id);
+
+-- adding foreign key for branch_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_branch
+FOREIGN KEY (branch_id)
+REFERENCES BL_DM.dim_branches(branch_id);
+
+-- adding foreign key for channel_id
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_channel
+FOREIGN KEY (channel_id)
+REFERENCES BL_DM.dim_channels(channel_id);
 COMMIT;
