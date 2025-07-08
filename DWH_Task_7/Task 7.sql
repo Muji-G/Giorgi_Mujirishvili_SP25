@@ -254,3 +254,14 @@ ADD CONSTRAINT fk_sales_channel
 FOREIGN KEY (channel_id)
 REFERENCES BL_DM.dim_channels(channel_id);
 COMMIT;
+
+
+BEGIN;
+ALTER TABLE BL_DM.fct_sales
+ADD COLUMN price_id BIGINT DEFAULT -1;
+ALTER TABLE BL_DM.fct_sales
+ADD CONSTRAINT fk_sales_price
+FOREIGN KEY (price_id)
+REFERENCES BL_DM.dim_product_prices_scd(price_id);
+COMMIT;
+
