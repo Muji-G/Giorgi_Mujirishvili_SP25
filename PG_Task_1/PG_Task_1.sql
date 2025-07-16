@@ -1,4 +1,4 @@
-create database test_db;
+CREATE database test_db;
 
 SELECT d.oid, d.datname, d.datistemplate, d.datallowconn, t.spcname
 FROM pg_database d
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS labs.person (
     name VARCHAR(15)
 );
 
-SHOW search_path; --public, public, "$user"
+SHOW search_path; 
 
 SET search_path TO labs;
 
