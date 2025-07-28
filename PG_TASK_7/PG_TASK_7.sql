@@ -1,9 +1,38 @@
 -- creating schema and log table, as well as log procedure activity
 CREATE SCHEMA IF NOT EXISTS BL_CL;
+-- granting priviledges
+BEGIN;
+
+-- BL_DM schema and its tables
+GRANT USAGE ON SCHEMA BL_DM TO postgres;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA BL_DM TO postgres;
+
+-- BL_3NF sequences and tables
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA BL_3NF TO postgres;
+GRANT SELECT ON ALL TABLES IN SCHEMA BL_3NF TO postgres;
+
+-- full privileges on BL_CL schema
+GRANT ALL ON SCHEMA BL_CL TO postgres;
+GRANT SELECT, INSERT ON bl_cl.load_log TO postgres;
+
+-- BL_3NF tables
+GRANT SELECT, INSERT ON bl_3nf.ce_addresses TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_customers TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_employees TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_branches TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_channels TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_products TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_product_categories TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_product_subcategories TO postgres;
+GRANT SELECT, INSERT ON bl_3nf.ce_product_prices_scd TO postgres;
+
+COMMIT;
 
 BEGIN;
-CREATE TABLE IF NOT EXISTS BL_CL.load_log (
-    log_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+CREATE SEQUENCE IF NOT EXISTS bl_cl.seq_load_log_id;
+
+CREATE TABLE IF NOT EXISTS bl_cl.load_log (
+    log_id           BIGINT PRIMARY KEY DEFAULT nextval('bl_cl.seq_load_log_id'),
     log_ts           TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     procedure_name   TEXT NOT NULL,
     rows_affected    INTEGER NOT NULL,
