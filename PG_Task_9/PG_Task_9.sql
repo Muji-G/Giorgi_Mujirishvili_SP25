@@ -1,349 +1,317 @@
---CE_SALES
---FUNCTION
-CREATE OR REPLACE FUNCTION bl_cl.fn_get_new_3nf_ce_sales_rows()
-RETURNS TABLE (
-    date_id BIGINT,
-    customer_id BIGINT,
-    employee_id BIGINT,
-    branch_id BIGINT,
-    channel_id BIGINT,
-    product_id BIGINT,
-    price_id BIGINT,
-    quantity_no INT,
-    unit_price_act FLOAT,
-    discount_act FLOAT,
-    amount_tot_act FLOAT,
-    cost_act FLOAT,
-    gross_income_act FLOAT
-)
-LANGUAGE SQL
-AS $$
-WITH unified_source AS (
-    SELECT
-        'OFFLINE' AS channel_name,
-        o.item_code,
-        o.unit_selling_price,
-        o.discount,
-        o.total_sales,
-        o.cost,
-        o.gross_income,
-        o.quantity_sold,
-        o.year,
-        o.month,
-        o.day,
-        o.employee_id,
-        o.branch,
-        o.city,
-        o.customer_id,
-        MAKE_DATE(CAST(o.year AS INT), CAST(o.month AS INT), CAST(o.day AS INT)) AS sale_date
-    FROM sa_offline.src_offline_orders o
-    WHERE TRIM(o.item_code) <> ''
-      AND o.unit_selling_price ~ '^[0-9.]+$'
-      AND o.year ~ '^\d{4}$' AND o.month ~ '^\d{1,2}$' AND o.day ~ '^\d{1,2}$'
-
-    UNION ALL
-
-    SELECT
-        'ONLINE',
-        o.item_code,
-        o.unit_selling_price,
-        o.discount,
-        o.total_sales,
-        o.cost,
-        o.gross_income,
-        o.quantity_sold,
-        o.year,
-        o.month,
-        o.day,
-        o.employee_id,
-        o.branch,
-        o.city,
-        COALESCE(o.customer_id_1, o.customer_id_2),
-        MAKE_DATE(CAST(o.year AS INT), CAST(o.month AS INT), CAST(o.day AS INT)) AS sale_date
-    FROM sa_online.src_online_orders o
-    WHERE TRIM(o.item_code) <> ''
-      AND o.unit_selling_price ~ '^[0-9.]+$'
-      AND o.year ~ '^\d{4}$' AND o.month ~ '^\d{1,2}$' AND o.day ~ '^\d{1,2}$'
-),
-
-prepared_data AS (
-    SELECT
-        (SELECT date_id FROM bl_3nf.ce_time_day WHERE date_src_id = us.sale_date) AS date_id,
-
-        (SELECT customer_id FROM bl_3nf.ce_customers
-         WHERE CAST(customer_src_id AS TEXT) = REGEXP_REPLACE(us.customer_id, '[^0-9]', '', 'g')
-         LIMIT 1) AS customer_id,
-
-        (SELECT employee_id FROM bl_3nf.ce_employees
-         WHERE CAST(employee_src_id AS TEXT) = REGEXP_REPLACE(us.employee_id, '[^0-9]', '', 'g')
-         LIMIT 1) AS employee_id,
-
-        (SELECT branch_id FROM bl_3nf.ce_branches
-         WHERE LOWER(branch_name) = LOWER(TRIM(us.branch))
-           AND EXISTS (
-               SELECT 1 FROM bl_3nf.ce_addresses a
-               WHERE a.address_id = ce_branches.address_id
-                 AND LOWER(a.city_name) = LOWER(TRIM(us.city))
-           )
-         LIMIT 1) AS branch_id,
-
-        (SELECT channel_id FROM bl_3nf.ce_channels
-         WHERE LOWER(channel_name) = LOWER(us.channel_name)
-         LIMIT 1) AS channel_id,
-
-        (SELECT product_id FROM bl_3nf.ce_products
-         WHERE product_src_id = us.item_code
-         LIMIT 1) AS product_id,
-
-        (SELECT price_id FROM bl_3nf.ce_product_prices_scd
-         WHERE product_id = (
-             SELECT product_id FROM bl_3nf.ce_products WHERE product_src_id = us.item_code LIMIT 1
-         )
-         AND price_amt_act = CAST(us.unit_selling_price AS FLOAT)
-         LIMIT 1) AS price_id,
-
-        CAST(NULLIF(us.quantity_sold, '') AS INT) AS quantity_no,
-        CAST(us.unit_selling_price AS FLOAT) AS unit_price_act,
-        COALESCE(CAST(NULLIF(us.discount, '') AS FLOAT), 0.0) AS discount_act,
-        COALESCE(CAST(NULLIF(us.total_sales, '') AS FLOAT), 0.0) AS amount_tot_act,
-        COALESCE(CAST(NULLIF(us.cost, '') AS FLOAT), 0.0) AS cost_act,
-        COALESCE(CAST(NULLIF(us.gross_income, '') AS FLOAT), 0.0) AS gross_income_act
-    FROM unified_source us
-)
-
-SELECT *
-FROM prepared_data p
-WHERE date_id IS NOT NULL
-  AND customer_id IS NOT NULL
-  AND employee_id IS NOT NULL
-  AND branch_id IS NOT NULL
-  AND channel_id IS NOT NULL
-  AND product_id IS NOT NULL
-  AND price_id IS NOT NULL
-  AND NOT EXISTS (
-      SELECT 1 FROM bl_3nf.ce_sales t
-      WHERE t.date_id = p.date_id
-        AND t.customer_id = p.customer_id
-        AND t.employee_id = p.employee_id
-        AND t.branch_id = p.branch_id
-        AND t.channel_id = p.channel_id
-        AND t.product_id = p.product_id
-        AND t.price_id = p.price_id
-  );
-$$;
-
---PROCEDURE
-CREATE OR REPLACE PROCEDURE bl_cl.sp_load_ce_sales()
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_start_time TIMESTAMP := clock_timestamp();
-    v_rows_inserted INT := 0;
+-- Ensure the composite type exists
+DO $$
 BEGIN
-    -- Insert only new sales records not already in ce_sales
-    INSERT INTO bl_3nf.ce_sales (
-	 date_id,
-    customer_id,
-    employee_id,
-    branch_id,
-    channel_id,
-    product_id,
-    price_id,
-    quantity_no,
-    unit_price_act,
-    discount_act,
-    amount_tot_act,
-    cost_act,
-    gross_income_act
-    )
-    SELECT *
-    FROM bl_cl.fn_get_new_3nf_ce_sales_rows();
-
-    GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
-
-    -- Log success
-    INSERT INTO bl_cl.load_log (
-        log_ts, procedure_name, rows_affected, log_message
-    )
-    VALUES (
-        v_start_time, 'bl_cl.sp_load_ce_sales', v_rows_inserted,
-        'SUCCESS: Inserted new CE_SALES records'
-    );
-EXCEPTION
-    WHEN OTHERS THEN
-        -- Log failure
-        INSERT INTO bl_cl.load_log (
-            log_ts, procedure_name, rows_affected, log_message
-        )
-        VALUES (
-            v_start_time, 'bl_cl.sp_load_ce_sales', 0,
-            'FAILURE: ' || SQLERRM
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.typname = 'tp_ce_sales_row'
+          AND n.nspname = 'bl_cl'
+    ) THEN
+        CREATE TYPE bl_cl.tp_ce_sales_row AS (
+            date_id          BIGINT,
+            customer_id      BIGINT,
+            employee_id      BIGINT,
+            branch_id        BIGINT,
+            channel_id       BIGINT,
+            product_id       BIGINT,
+            price_id         BIGINT,
+            quantity_no      INT,
+            unit_price_act   FLOAT,
+            discount_act     FLOAT,
+            amount_tot_act   FLOAT,
+            cost_act         FLOAT,
+            gross_income_act FLOAT,
+            source_system    TEXT,
+            source_entity    TEXT
         );
-        RAISE;
+    END IF;
 END;
 $$;
 
 
-select * from bl_cl.fn_get_new_3nf_ce_sales_rows()
-
-CALL bl_cl.sp_load_ce_sales()
-
-SELECT * 
-FROM bl_cl.load_log
-WHERE procedure_name = 'bl_cl.sp_load_ce_sales'
-ORDER BY log_ts DESC;
-
-
---DIM_SALES
---PARTITIONS
-ALTER TABLE bl_dm.fct_sales
-PARTITION BY RANGE (date_id);
-
--- since this query sin't supported by postgres I had to recreate the table and add partitions there
-ALTER TABLE bl_dm.fct_sales RENAME TO fct_sales_old;
- 
-BEGIN;
-CREATE TABLE bl_dm.fct_sales (
-    date_id             BIGINT NOT NULL,
-    customer_id         BIGINT NOT NULL,
-    employee_id         BIGINT NOT NULL,
-    product_id          BIGINT NOT NULL,
-    branch_id           BIGINT NOT NULL,
-    channel_id          BIGINT NOT NULL,
-    quantity_act        FLOAT,
-    unit_price_act      FLOAT,
-    amount_act          FLOAT,
-    cost_act            FLOAT,
-    gross_income_act    FLOAT,
-    discount_act        FLOAT,
-    ta_insert_dt        DATE NOT NULL,
-    ta_update_dt        DATE NOT NULL,
-    PRIMARY KEY (date_id, product_id, branch_id, customer_id, channel_id)
-) PARTITION BY RANGE (date_id);
-COMMIT;
-
-BEGIN;
--- adding foreign key for date_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_date
-FOREIGN KEY (date_id)
-REFERENCES BL_DM.dim_dates(date_id);
-
--- adding foreign key for customer_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_customer
-FOREIGN KEY (customer_id)
-REFERENCES BL_DM.dim_customers(customer_id);
-
--- adding foreign key for employee_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_employee
-FOREIGN KEY (employee_id)
-REFERENCES BL_DM.dim_employees(employee_id);
-
--- adding foreign key for product_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_product
-FOREIGN KEY (product_id)
-REFERENCES BL_DM.dim_products(product_id);
-
--- adding foreign key for branch_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_branch
-FOREIGN KEY (branch_id)
-REFERENCES BL_DM.dim_branches(branch_id);
-
--- adding foreign key for channel_id
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_channel
-FOREIGN KEY (channel_id)
-REFERENCES BL_DM.dim_channels(channel_id);
-COMMIT;
-
-
-BEGIN;
-ALTER TABLE BL_DM.fct_sales
-ADD COLUMN price_id BIGINT DEFAULT -1;
-ALTER TABLE BL_DM.fct_sales
-ADD CONSTRAINT fk_sales_price
-FOREIGN KEY (price_id)
-REFERENCES BL_DM.dim_product_prices_scd(price_id);
-COMMIT;
-
-DROP TABLE bl_dm.fct_sales_old;
-
-
---ROLLING WINDOW
-DO $$
-DECLARE
-    base_month DATE := date_trunc('month', CURRENT_DATE - INTERVAL '2 months');
-    current_month DATE;
-    next_month DATE;
-    part_name TEXT;
-    from_date_id BIGINT;
-    to_date_id   BIGINT;
-BEGIN
-    FOR i IN 0..3 LOOP
-        current_month := base_month + (i || ' month')::INTERVAL;
-        next_month := current_month + INTERVAL '1 month';
-        part_name := format('fct_sales_%s', to_char(current_month, 'YYYY_MM'));
-
-        SELECT date_id INTO from_date_id
-        FROM bl_3nf.ce_time_day
-        WHERE date_src_id = current_month;
-
-        SELECT date_id INTO to_date_id
-        FROM bl_3nf.ce_time_day
-        WHERE date_src_id = next_month;
-
-        IF from_date_id IS NOT NULL AND to_date_id IS NOT NULL THEN
-            EXECUTE format(
-                'CREATE TABLE IF NOT EXISTS bl_dm.%I PARTITION OF bl_dm.fct_sales
-                 FOR VALUES FROM (%L) TO (%L);',
-                part_name, from_date_id, to_date_id
-            );
-        END IF;
-    END LOOP;
-END $$;
-
--- DETACHING AND DROPPING OLDER PARTITIONS
-DO $$
-DECLARE
-    cutoff DATE := date_trunc('month', CURRENT_DATE - INTERVAL '3 months');
-    part RECORD;
-BEGIN
-    FOR part IN
-        SELECT tablename
-        FROM pg_tables
-        WHERE schemaname = 'bl_dm'
-          AND tablename LIKE 'fct_sales_%'
-    LOOP
-        IF to_date(substring(part.tablename from 11), 'YYYY_MM') < cutoff THEN
-            EXECUTE format('ALTER TABLE bl_dm.fct_sales DETACH PARTITION bl_dm.%I;', part.tablename);
-            EXECUTE format('DROP TABLE IF EXISTS bl_dm.%I;', part.tablename);
-        END IF;
-    END LOOP;
-END $$;
-
--- FUNCTION
-CREATE OR REPLACE FUNCTION bl_dm.fn_get_new_fct_sales_rows()
-RETURNS TABLE (
-    date_id BIGINT,
-    customer_id BIGINT,
-    employee_id BIGINT,
-    product_id BIGINT,
-    branch_id BIGINT,
-    channel_id BIGINT,
-    price_id BIGINT,
-    quantity_act FLOAT,
-    unit_price_act FLOAT,
-    amount_act FLOAT,
-    cost_act FLOAT,
-    gross_income_act FLOAT,
-    discount_act FLOAT
+-- Resolver function
+CREATE OR REPLACE FUNCTION bl_cl.fn_resolve_ce_sales_record(
+    p_order_date    DATE,
+    p_customer_src  TEXT,
+    p_employee_src  TEXT,
+    p_branch_src    TEXT,
+    p_channel_src   TEXT,
+    p_product_src   TEXT,
+    p_unit_price    FLOAT,
+    p_quantity      INT,
+    p_unit_price2   FLOAT,
+    p_discount      FLOAT,
+    p_amount_tot    FLOAT,
+    p_cost          FLOAT,
+    p_gross_income  FLOAT,
+    p_source_system TEXT,
+    p_source_entity TEXT
 )
-LANGUAGE SQL
+RETURNS bl_cl.tp_ce_sales_row
+LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_date_id     BIGINT;
+    v_customer_id BIGINT;
+    v_employee_id BIGINT;
+    v_branch_id   BIGINT;
+    v_channel_id  BIGINT;
+    v_product_id  BIGINT;
+    v_price_id    BIGINT;
+    rec bl_cl.tp_ce_sales_row;
+BEGIN
+    SELECT date_id INTO v_date_id
+      FROM bl_3nf.ce_time_day
+     WHERE date_src_id = p_order_date;
+    IF v_date_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT customer_id INTO v_customer_id
+      FROM bl_3nf.ce_customers
+     WHERE customer_src_id::text = p_customer_src
+       AND source_system = p_source_system;
+    IF v_customer_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT employee_id INTO v_employee_id
+      FROM bl_3nf.ce_employees
+     WHERE employee_src_id::text = p_employee_src;
+    IF v_employee_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT branch_id INTO v_branch_id
+      FROM bl_3nf.ce_branches
+     WHERE branch_src_id::text = p_branch_src
+        OR LOWER(branch_name) = LOWER(p_branch_src)
+     LIMIT 1;
+    IF v_branch_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT channel_id INTO v_channel_id
+      FROM bl_3nf.ce_channels
+     WHERE channel_src_id::text = p_channel_src
+        OR LOWER(channel_name) = LOWER(p_channel_src)
+     LIMIT 1;
+    IF v_channel_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT product_id INTO v_product_id
+      FROM bl_3nf.ce_products
+     WHERE product_src_id::text = p_product_src;
+    IF v_product_id IS NULL THEN RETURN NULL; END IF;
+
+    SELECT price_id INTO v_price_id
+      FROM bl_3nf.ce_product_prices_scd
+     WHERE product_id = v_product_id
+       AND price_amt_act = p_unit_price
+       AND (is_active IN ('Y','y') OR is_active::text ILIKE 'true')
+     LIMIT 1;
+
+    IF v_price_id IS NULL THEN
+        SELECT price_id INTO v_price_id
+          FROM bl_3nf.ce_product_prices_scd
+         WHERE product_id = v_product_id
+           AND (is_active IN ('Y','y') OR is_active::text ILIKE 'true')
+         ORDER BY start_dt DESC
+         LIMIT 1;
+        IF v_price_id IS NULL THEN RETURN NULL; END IF;
+    END IF;
+
+    rec := ROW(v_date_id, v_customer_id, v_employee_id, v_branch_id, v_channel_id, v_product_id, v_price_id,
+               p_quantity, p_unit_price2, p_discount, p_amount_tot, p_cost, p_gross_income,
+               p_source_system, p_source_entity);
+    RETURN rec;
+END;
+$$;
+
+-- Function to return only new rows
+CREATE OR REPLACE FUNCTION bl_cl.fn_get_new_ce_sales()
+RETURNS SETOF bl_cl.tp_ce_sales_row
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    rec bl_cl.tp_ce_sales_row;
+BEGIN
+    -- Online orders
+    FOR rec IN
+        SELECT
+            (sub.r).date_id,
+            (sub.r).customer_id,
+            (sub.r).employee_id,
+            (sub.r).branch_id,
+            (sub.r).channel_id,
+            (sub.r).product_id,
+            (sub.r).price_id,
+            (sub.r).quantity_no,
+            (sub.r).unit_price_act,
+            (sub.r).discount_act,
+            (sub.r).amount_tot_act,
+            (sub.r).cost_act,
+            (sub.r).gross_income_act,
+            (sub.r).source_system,
+            (sub.r).source_entity
+        FROM (
+            SELECT bl_cl.fn_resolve_ce_sales_record(
+                MAKE_DATE(o.year::INT, o.month::INT, o.day::INT),
+                o.customer_id_1::text,
+                o.employee_id::text,
+                o.branch::text,
+                'ONLINE',
+                o.item_code::text,
+                o.unit_selling_price::FLOAT,
+                o.quantity_sold::INT,
+                o.unit_selling_price::FLOAT,
+                o.discount::FLOAT,
+                o.total_sales::FLOAT,
+                o.cost::FLOAT,
+                o.gross_income::FLOAT,
+                'Online',
+                'SRC_ONLINE_ORDERS'
+            ) AS r
+            FROM sa_online.src_online_orders o
+        ) sub
+        WHERE sub.r IS NOT NULL
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM bl_3nf.ce_sales s
+            WHERE s.date_id = rec.date_id AND s.customer_id = rec.customer_id
+              AND s.employee_id = rec.employee_id AND s.branch_id = rec.branch_id
+              AND s.channel_id = rec.channel_id AND s.product_id = rec.product_id
+              AND s.price_id = rec.price_id
+        ) THEN
+            RETURN NEXT rec;
+        END IF;
+    END LOOP;
+
+    -- Offline orders
+    FOR rec IN
+        SELECT
+            (sub.r).date_id,
+            (sub.r).customer_id,
+            (sub.r).employee_id,
+            (sub.r).branch_id,
+            (sub.r).channel_id,
+            (sub.r).product_id,
+            (sub.r).price_id,
+            (sub.r).quantity_no,
+            (sub.r).unit_price_act,
+            (sub.r).discount_act,
+            (sub.r).amount_tot_act,
+            (sub.r).cost_act,
+            (sub.r).gross_income_act,
+            (sub.r).source_system,
+            (sub.r).source_entity
+        FROM (
+            SELECT bl_cl.fn_resolve_ce_sales_record(
+                MAKE_DATE(o.year::INT, o.month::INT, o.day::INT),
+                o.customer_id::text,
+                o.employee_id::text,
+                o.branch::text,
+                'OFFLINE',
+                o.item_code::text,
+                o.unit_selling_price::FLOAT,
+                o.quantity_sold::INT,
+                o.unit_selling_price::FLOAT,
+                o.discount::FLOAT,
+                o.total_sales::FLOAT,
+                o.cost::FLOAT,
+                o.gross_income::FLOAT,
+                'Offline',
+                'SRC_OFFLINE_ORDERS'
+            ) AS r
+            FROM sa_offline.src_offline_orders o
+        ) sub
+        WHERE sub.r IS NOT NULL
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM bl_3nf.ce_sales s
+            WHERE s.date_id = rec.date_id AND s.customer_id = rec.customer_id
+              AND s.employee_id = rec.employee_id AND s.branch_id = rec.branch_id
+              AND s.channel_id = rec.channel_id AND s.product_id = rec.product_id
+              AND s.price_id = rec.price_id
+        ) THEN
+            RETURN NEXT rec;
+        END IF;
+    END LOOP;
+    RETURN;
+END;
+$$;
+
+
+-- Load procedure
+CREATE OR REPLACE PROCEDURE bl_cl.sp_load_ce_sales()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    rec bl_cl.tp_ce_sales_row;
+    v_rows_inserted INT := 0;
+    cur REFCURSOR;
+BEGIN
+    OPEN cur FOR SELECT * FROM bl_cl.fn_get_new_ce_sales();
+    LOOP
+        FETCH cur INTO rec;
+        EXIT WHEN NOT FOUND;
+        INSERT INTO bl_3nf.ce_sales (
+            date_id, customer_id, employee_id, branch_id, channel_id,
+            product_id, price_id, quantity_no, unit_price_act,
+            discount_act, amount_tot_act, cost_act, gross_income_act
+        ) VALUES (
+            rec.date_id, rec.customer_id, rec.employee_id, rec.branch_id, rec.channel_id,
+            rec.product_id, rec.price_id, rec.quantity_no, rec.unit_price_act,
+            rec.discount_act, rec.amount_tot_act, rec.cost_act, rec.gross_income_act
+        );
+        v_rows_inserted := v_rows_inserted + 1;
+    END LOOP;
+    CLOSE cur;
+    CALL bl_cl.pr_log_etl_event(
+        'sp_load_ce_sales',
+        v_rows_inserted,
+        CASE WHEN v_rows_inserted > 0 THEN
+            'Inserted ' || v_rows_inserted || ' new CE_SALES rows.'
+        ELSE
+            'No new CE_SALES rows to insert.'
+        END
+    );
+END;
+$$;
+
+-- Preview new rows without inserting
+SELECT * FROM bl_cl.fn_get_new_ce_sales();
+-- Load new rows
+CALL bl_cl.sp_load_ce_sales();
+-- Check CE_SALES contents
+SELECT * FROM bl_3nf.ce_sales ORDER BY date_id DESC;
+-- Review the ETL log
+SELECT * FROM bl_cl.log_etl_executions
+-- WHERE procedure_name = 'sp_load_ce_sales'
+ORDER BY log_dt DESC;
+
+
+
+
+-- Procedure: pr_load_fct_sales_dm
+
+CREATE OR REPLACE PROCEDURE bl_cl.pr_load_fct_sales_dm(
+    p_months_back INT DEFAULT 3
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_now        DATE := CURRENT_DATE;
+    v_start_win  DATE;
+    v_end_win    DATE := (date_trunc('month', v_now) + INTERVAL '1 month')::DATE;
+    v_part_start DATE;
+    v_part_end   DATE;
+    v_part_name  TEXT;
+    v_rows       INTEGER := 0;
+BEGIN
+    IF p_months_back < 1 THEN
+        p_months_back := 1;
+    END IF;
+    -- Determine start of rolling window: e.g. if p_months_back = 3 and
+    -- today is 2025-08-15, start at the first day of June 2025
+    v_start_win := (date_trunc('month', v_now) - (p_months_back - 1) * INTERVAL '1 month')::DATE;
+
+    -- Build a temporary staging table with new fact rows for the window
+    -- Only select rows from CE_SALES whose date falls within the window
+    -- and which do not already exist in the DM fact table.
+    DROP TABLE IF EXISTS pg_temp.stg_fct_sales;
+    CREATE TEMP TABLE stg_fct_sales AS
     SELECT
         s.date_id,
         s.customer_id,
@@ -352,81 +320,110 @@ AS $$
         s.branch_id,
         s.channel_id,
         s.price_id,
-        s.quantity_no       AS quantity_act,
-        s.unit_price_act    AS unit_price_act,
-        s.amount_tot_act    AS amount_act,
-        s.cost_act          AS cost_act,
-        s.gross_income_act  AS gross_income_act,
-        s.discount_act      AS discount_act
+        s.quantity_no      AS quantity_act,
+        s.unit_price_act   AS unit_price_act,
+        s.amount_tot_act   AS amount_act,
+        s.cost_act         AS cost_act,
+        s.gross_income_act AS gross_income_act,
+        s.discount_act     AS discount_act,
+        CURRENT_DATE       AS ta_insert_dt,
+        CURRENT_DATE       AS ta_update_dt
     FROM bl_3nf.ce_sales s
-    WHERE s.date_id IN (
-        SELECT date_id
-        FROM bl_3nf.ce_time_day
-        WHERE date_src_id >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')
-    )
-    AND NOT EXISTS (
-        SELECT 1
-        FROM bl_dm.fct_sales f
-        WHERE f.date_id = s.date_id
-          AND f.product_id = s.product_id
-          AND f.branch_id = s.branch_id
-          AND f.customer_id = s.customer_id
-          AND f.channel_id = s.channel_id
-          AND f.price_id = s.price_id
-    );
-$$;
-
--- 6. Refresh Procedure Using Deduplication
-CREATE OR REPLACE PROCEDURE bl_dm.sp_refresh_dm_fact_sales()
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_start_time TIMESTAMP := clock_timestamp();
-    v_rows_inserted INT := 0;
-BEGIN
-    INSERT INTO bl_dm.fct_sales (
-        date_id, customer_id, employee_id, product_id, branch_id,
-        channel_id, price_id,
-        quantity_act, unit_price_act, amount_act,
-        cost_act, gross_income_act, discount_act,
-        ta_insert_dt, ta_update_dt
-    )
-    SELECT
-        date_id, customer_id, employee_id, product_id, branch_id,
-        channel_id, price_id,
-        quantity_act, unit_price_act, amount_act,
-        cost_act, gross_income_act, discount_act,
-        CURRENT_DATE, CURRENT_DATE
-    FROM bl_dm.fn_get_new_fct_sales_rows();
-
-    GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
-
-    INSERT INTO etl_log (
-        procedure_name, execution_ts, rows_inserted, status, message
-    )
-    VALUES (
-        'bl_dm.sp_refresh_dm_fact_sales',
-        v_start_time, v_rows_inserted,
-        'SUCCESS', 'DM fact_sales refresh completed using deduplicated function'
-    );
-
-EXCEPTION
-    WHEN OTHERS THEN
-        INSERT INTO etl_log (
-            procedure_name, execution_ts, rows_inserted, status, message
-        )
-        VALUES (
-            'bl_dm.sp_refresh_dm_fact_sales',
-            v_start_time, 0,
-            'FAILURE', SQLERRM
+    JOIN bl_dm.dim_dates d ON d.date_id = s.date_id
+    WHERE d.date_act >= v_start_win
+      AND d.date_act <  v_end_win
+      AND NOT EXISTS (
+            SELECT 1
+            FROM bl_dm.fct_sales f
+            WHERE f.date_id     = s.date_id
+              AND f.customer_id = s.customer_id
+              AND f.employee_id = s.employee_id
+              AND f.branch_id   = s.branch_id
+              AND f.channel_id  = s.channel_id
+              AND f.product_id  = s.product_id
+              AND f.price_id    = s.price_id
         );
-        RAISE;
+
+    -- Iterate through each month in the window
+    v_part_start := v_start_win;
+    WHILE v_part_start < v_end_win LOOP
+        v_part_end := (v_part_start + INTERVAL '1 month')::DATE;
+        v_part_name := format('fct_sales_%s', to_char(v_part_start, 'YYYYMM'));
+
+        -- Detach and drop existing partition if it exists
+        EXECUTE format('ALTER TABLE bl_dm.fct_sales DETACH PARTITION IF EXISTS %I', v_part_name);
+        EXECUTE format('DROP TABLE IF EXISTS bl_dm.%I', v_part_name);
+
+        -- Create a fresh partition for the month
+        EXECUTE format(
+            'CREATE TABLE bl_dm.%I PARTITION OF bl_dm.fct_sales FOR VALUES FROM (%L) TO (%L)',
+            v_part_name, v_part_start, v_part_end
+        );
+
+        -- Insert data for this month from the staging table
+        EXECUTE format(
+            'INSERT INTO bl_dm.fct_sales (
+                date_id, customer_id, employee_id, product_id, branch_id,
+                channel_id, quantity_act, unit_price_act, amount_act,
+                cost_act, gross_income_act, discount_act, ta_insert_dt,
+                ta_update_dt, price_id
+            )
+            SELECT date_id, customer_id, employee_id, product_id, branch_id,
+                   channel_id, quantity_act, unit_price_act, amount_act,
+                   cost_act, gross_income_act, discount_act, ta_insert_dt,
+                   ta_update_dt, price_id
+            FROM pg_temp.stg_fct_sales
+            WHERE date_id >= %L AND date_id < %L',
+            v_part_start, v_part_end
+        );
+        -- Update row count
+        GET DIAGNOSTICS v_rows = v_rows + ROW_COUNT;
+
+        v_part_start := v_part_end;
+    END LOOP;
+
+    -- Log the result
+    CALL bl_cl.pr_log_etl_event(
+        'pr_load_fct_sales_dm',
+        v_rows,
+        CASE WHEN v_rows > 0 THEN 'Loaded ' || v_rows || ' fact rows into DM.' ELSE 'No fact rows loaded.' END
+    );
 END;
 $$;
 
 
-select * from bl_dm.fn_get_new_fct_sales_rows()
 
-CALL bl_cl.sp_load_ce_sales()
+ CALL bl_cl.pr_load_fct_sales_dm();
+ CALL bl_cl.pr_load_fct_sales_dm();  -- second run should insert zero rows
+ SELECT * FROM bl_cl.log_etl_executions
+   WHERE procedure_name = 'pr_load_fct_sales_dm'
+   ORDER BY log_dt DESC;
+ 
+ 
+
+SELECT relname AS partition_name
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_inherits i ON c.oid = i.inhrelid
+JOIN pg_catalog.pg_class p ON i.inhparent = p.oid
+WHERE p.relname = 'fct_sales';
 
 
+SELECT date_id, customer_id, employee_id, product_id, branch_id, channel_id, price_id, COUNT(*)
+FROM bl_dm.fct_sales
+WHERE date_id >= (SELECT date_id FROM bl_dm.dim_dates WHERE date_act = date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')
+GROUP BY 1,2,3,4,5,6,7
+HAVING COUNT(*) > 1;
+
+
+SELECT COUNT(*) AS missing_fact_rows
+FROM (
+    SELECT s.date_id, s.customer_id, s.employee_id, s.product_id, s.branch_id, s.channel_id, s.price_id
+    FROM bl_3nf.ce_sales s
+    JOIN bl_dm.dim_dates d ON d.date_id = s.date_id
+    WHERE d.date_act >= (date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')
+      AND d.date_act <  (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')
+    EXCEPT
+    SELECT date_id, customer_id, employee_id, product_id, branch_id, channel_id, price_id
+    FROM bl_dm.fct_sales
+    WHERE date_id >= (SELECT date_id FROM bl_dm.dim_dates WHERE date_act = date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')
+) missing;
