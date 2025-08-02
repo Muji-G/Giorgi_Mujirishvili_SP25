@@ -1,3 +1,12 @@
+BEGIN;
+GRANT USAGE ON SCHEMA BL_DM TO postgres;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA BL_DM TO postgres;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA BL_3NF TO postgres;
+GRANT SELECT ON ALL TABLES IN SCHEMA BL_3NF TO postgres;
+GRANT ALL ON SCHEMA BL_CL TO postgres;
+COMMIT;
+
+
 ALTER TABLE bl_dm.dim_employees
     ADD CONSTRAINT uq_dim_employees_employee_src_id UNIQUE (employee_src_id);
 
@@ -432,6 +441,7 @@ SELECT * FROM bl_cl.fn_get_new_dim_products();
 CALL bl_cl.pr_load_dim_products();
 CALL bl_cl.pr_load_dim_products();
 SELECT product_src_id, COUNT(*) FROM bl_dm.dim_products GROUP BY product_src_id HAVING COUNT(*) > 1;
+
 
 -- Composite type for product price rows.  It includes product_src_id and
 -- derived price amounts for both unit and fact prices.
